@@ -198,7 +198,7 @@
 </style>
 </head>
 <body>
-  <h1>⚡ Meter Token Helper <span class="ver">v1.0</span></h1>
+  <h1>⚡ Meter Token Helper <span class="ver">v1.1</span></h1>
   <p class="sub">Paste your prepaid recharge SMS. Enter each token into your meter and cross the digits as you go.</p>
 
   <div class="card">
@@ -411,7 +411,7 @@
   // --- Mic beep detection ---------------------------------------------
   var audioCtx = null, analyser = null, micStream = null, rafId = null;
   var listening = false, armed = true, calibrating = false;
-  var lastCross = 0, wasBeep = false;
+  var lastCross = 0, sustain = 0, fired = false;
   var calibProfile = null; // { bin, level }
   var sensEl = $("sens");
   var levelBar = $("levelBar");
@@ -450,24 +450,29 @@
 
   // Learn the meter's beep: wait for a clear TONAL beep (sharp peak far above
   // the noise floor), lock its pitch, and finish as soon as it's captured.
+  var calGen = 0; // cancels any earlier in-progress scan when re-learning
   function calibrate() {
+    calGen++;                       // invalidate a previous scan if still running
+    var myGen = calGen;
     startListen(function () {
+      if (myGen !== calGen) return;
       calibrating = true;
+      sustain = 0; fired = false;
       calBtn.classList.add("calibrating");
       calBtn.textContent = "Press a meter key to beep…";
-      micHint.textContent = "Waiting for the beep… press one key on your meter now.";
+      micHint.textContent = "Listening… press one key on your meter to beep now.";
       var arr = new Uint8Array(analyser.frequencyBinCount);
       var binHz = audioCtx.sampleRate / analyser.fftSize;
       var lo = Math.floor(600 / binHz), hi = Math.min(arr.length - 1, Math.ceil(9000 / binHz));
-      var best = { level: 0, bin: 0, ratio: 0 };
-      var firstHit = 0;                 // when a beep was first detected
+      var best = { level: 0, bin: 0 };
+      var firstHit = 0;
       var start = performance.now();
       var TIMEOUT = 8000;
 
       (function scan() {
+        if (myGen !== calGen) return;        // superseded by a newer re-learn
         if (!analyser) { calibrating = false; return; }
         analyser.getByteFrequencyData(arr);
-        // peak inside the search band
         var peak = 0, pbin = lo, sum = 0;
         for (var i = lo; i <= hi; i++) { if (arr[i] > peak) { peak = arr[i]; pbin = i; } }
         for (var j = 0; j < arr.length; j++) sum += arr[j];
@@ -476,19 +481,16 @@
         levelBar.style.width = Math.min(100, peak * 0.5) + "%";
 
         var now = performance.now();
-        // A real beep: loud AND tonal (peak stands well above broadband noise).
-        var isBeep = peak > 60 && ratio > 4;
+        // A real beep: reasonably loud AND tonal (peak above broadband noise).
+        var isBeep = peak > 45 && ratio > 3.5;
         if (isBeep) {
           blip.classList.add("hit");
           if (!firstHit) firstHit = now;
-          // keep the strongest reading of this beep
-          if (peak > best.level) { best = { level: peak, bin: pbin, ratio: ratio }; }
+          if (peak > best.level) { best = { level: peak, bin: pbin }; }
         } else {
           blip.classList.remove("hit");
         }
 
-        // Finish 250ms after first detection (captures the beep's true peak),
-        // or bail out after the timeout.
         var done = (firstHit && now - firstHit > 250) || (now - start > TIMEOUT);
         if (!done) { requestAnimationFrame(scan); return; }
 
@@ -496,8 +498,8 @@
         blip.classList.remove("hit");
         calBtn.classList.remove("calibrating");
         calBtn.textContent = "🎯 Re-learn beep";
-        if (!firstHit || best.level < 60) {
-          micHint.textContent = "Didn't catch a clear beep — try again, hold the phone closer to the meter.";
+        if (!firstHit || best.level < 45) {
+          micHint.textContent = "Didn't catch a clear beep — tap Re-learn and hold the phone closer to the meter.";
           return;
         }
         calibProfile = { bin: best.bin, level: best.level };
@@ -534,44 +536,59 @@
 
     var len = data.length;
     var binHz = audioCtx.sampleRate / analyser.fftSize;
-
-    // Noise floor = average across the whole spectrum (fans raise this evenly)
-    var sum = 0;
-    for (var j = 0; j < len; j++) sum += data[j];
-    var noise = sum / len;
-
-    var peak = 0, need, sens = parseInt(sensEl.value, 10);
-    if (calibProfile) {
-      // Only look at the learned beep frequency (±3 bins for drift)
-      var b = calibProfile.bin;
-      var lo = Math.max(1, b - 3), hi = Math.min(len - 1, b + 3);
-      for (var i = lo; i <= hi; i++) { if (data[i] > peak) peak = data[i]; }
-      // Slider right = more sensitive => needs a smaller fraction of the learned level
-      var frac = 0.80 - (sens - 4) / 56 * 0.55; // ~0.80 (left) .. ~0.25 (right)
-      need = Math.max(30, calibProfile.level * frac);
-      levelBar.style.width = Math.min(100, peak / calibProfile.level * 100) + "%";
-    } else {
-      // Generic fallback: brightest tone in 1.5-5 kHz
-      var g0 = Math.max(1, Math.floor(1500 / binHz)), g1 = Math.min(len - 1, Math.ceil(5000 / binHz));
-      for (var k = g0; k <= g1; k++) { if (data[k] > peak) peak = data[k]; }
-      need = 64 - sens;
-      levelBar.style.width = Math.min(100, peak * 0.5) + "%";
-    }
-
-    var ratio = peak / (noise + 1);       // tonality: high for a beep, low for a fan
+    var sens = parseInt(sensEl.value, 10);
     var now = performance.now();
+
+    // Global dominant frequency + noise floor, in one pass.
+    var gPeak = 0, gBin = 0, sum = 0;
+    for (var i = 1; i < len; i++) {
+      var v = data[i];
+      sum += v;
+      if (v > gPeak) { gPeak = v; gBin = i; }
+    }
+    var noise = sum / len;
+    var ratio = gPeak / (noise + 1);      // spectral purity: high = pure tone
+
+    var match;
+    if (calibProfile) {
+      var b = calibProfile.bin;
+      // Peak energy right around the learned pitch
+      var lo = Math.max(1, b - 2), hi = Math.min(len - 1, b + 2), bandPeak = 0;
+      for (var k = lo; k <= hi; k++) { if (data[k] > bandPeak) bandPeak = data[k]; }
+      levelBar.style.width = Math.min(100, bandPeak / calibProfile.level * 100) + "%";
+
+      // Slider right = more sensitive => smaller fraction of learned level needed
+      var frac = 0.80 - (sens - 4) / 56 * 0.55;      // ~0.80 (left) .. ~0.25 (right)
+      var need = Math.max(30, calibProfile.level * frac);
+      // ALL must hold: loud enough, the loudest tone in the room IS our pitch,
+      // and it is a sharp pure tone (not broadband noise).
+      match = bandPeak >= need &&
+              Math.abs(gBin - b) <= 3 &&
+              ratio >= 4.5;
+    } else {
+      var g0 = Math.max(1, Math.floor(1500 / binHz)), g1 = Math.min(len - 1, Math.ceil(5000 / binHz));
+      var gp = 0; for (var m = g0; m <= g1; m++) { if (data[m] > gp) gp = data[m]; }
+      levelBar.style.width = Math.min(100, gp * 0.5) + "%";
+      match = gp > (64 - sens) && gBin >= g0 && gBin <= g1 && ratio >= 4.5;
+    }
 
     if (state.activeIdx >= 0 && state.lines[state.activeIdx] && state.lines[state.activeIdx].crossed < 20) {
       armed = true;
     }
-    // Rising edge only, so a held sound crosses once, and steady noise never "onsets".
-    var isBeep = peak > need && ratio > 3.0;
-    if (isBeep && !wasBeep) {
+
+    // Require the tone to persist a few frames (~50ms): a real beep sustains,
+    // a click / clatter / knock does not. Fire once per beep, reset when it ends.
+    if (match) {
+      sustain++;
       blip.classList.add("hit");
-      setTimeout(function () { blip.classList.remove("hit"); }, 120);
-      if (armed && (now - lastCross) > 180) { lastCross = now; crossOne(); }
+      if (sustain >= 3 && !fired && armed && (now - lastCross) > 180) {
+        fired = true; lastCross = now; crossOne();
+      }
+    } else {
+      sustain = 0;
+      fired = false;
+      blip.classList.remove("hit");
     }
-    wasBeep = isBeep;
   }
 
   micBtn.addEventListener("click", function () {
