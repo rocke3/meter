@@ -164,8 +164,10 @@
   .btn-mic { background: var(--card2); color: var(--text); border: 1px solid var(--line); flex: 1; white-space: nowrap; padding: 11px 12px; }
   .btn-mic.on { background: var(--green); color: #05230f; }
   .btn-tap { background: var(--accent2); color: #04222f; min-width: 96px; white-space: nowrap; padding: 11px 14px; }
-  .btn-cal { background: var(--card2); color: var(--amber); border: 1px solid var(--amber); white-space: nowrap; padding: 9px 12px; font-size: 13px; }
+  .btn-cal { flex: 1; background: var(--card2); color: var(--amber); border: 1px solid var(--amber); white-space: nowrap; padding: 9px 12px; font-size: 13px;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
   .btn-cal.calibrating { background: var(--amber); color: #2a1a02; }
+  .btn-play { flex: 0 0 auto; width: 46px; padding: 9px 0; background: var(--card2); color: var(--accent); border: 1px solid var(--line); }
   .btn-help { flex: 0 0 auto; width: 38px; padding: 9px 0; background: var(--card2); color: var(--muted); border: 1px solid var(--line); }
   .blip { width: 14px; height: 14px; border-radius: 50%; background: var(--line); flex: 0 0 auto; transition: background .05s; }
   .blip.hit { background: var(--green); box-shadow: 0 0 10px var(--green); }
@@ -198,7 +200,7 @@
 </style>
 </head>
 <body>
-  <h1>⚡ Meter Token Helper <span class="ver">v1.1</span></h1>
+  <h1>⚡ Meter Token Helper <span class="ver">v1.2</span></h1>
   <p class="sub">Paste your prepaid recharge SMS. Enter each token into your meter and cross the digits as you go.</p>
 
   <div class="card">
@@ -222,12 +224,15 @@
     </div>
     <div class="mic-row2">
       <button class="btn-cal" id="calBtn">🎯 Learn beep from meter</button>
-      <div class="sens"><input type="range" id="sens" min="4" max="60" value="30" title="Sensitivity" /></div>
+      <button class="btn-play" id="playBtn" aria-label="Play learned beep" style="display:none">🔊</button>
       <button class="btn-help" id="helpBtn" aria-label="Help">?</button>
     </div>
+    <div class="mic-row2">
+      <div class="sens"><input type="range" id="sens" min="4" max="60" value="30" title="Sensitivity" /></div>
+    </div>
     <div class="level"><div id="levelBar"></div></div>
-    <div class="status" id="micHint">Tip: tap “Learn beep from meter” first for reliable detection.</div>
-    <div class="hint hidden" id="helpBox">Tap <b>Learn beep from meter</b> and press one meter key so it beeps once — the app learns that tone (saved for next time). Then turn on Listen; the dot flashes green per beep. Slider = sensitivity. Tap ✕ always crosses one manually.</div>
+    <div class="status" id="micHint">Tip: press &amp; hold “Learn beep from meter” first for reliable detection.</div>
+    <div class="hint hidden" id="helpBox"><b>Press and hold</b> Learn, press one meter key so it beeps while holding, then release — the app locks that tone (saved for next time). 🔊 plays it back to confirm. Then turn on Listen; the dot flashes green per beep. Slider = sensitivity. Tap ✕ always crosses one manually.</div>
   </div>
 
 <script>
@@ -418,6 +423,7 @@
   var micBtn = $("micBtn");
   var micHint = $("micHint");
   var calBtn = $("calBtn");
+  var playBtn = $("playBtn");
   var blip = $("blip");
 
   function startListen(onReady) {
@@ -448,66 +454,90 @@
       });
   }
 
-  // Learn the meter's beep: wait for a clear TONAL beep (sharp peak far above
-  // the noise floor), lock its pitch, and finish as soon as it's captured.
-  var calGen = 0; // cancels any earlier in-progress scan when re-learning
-  function calibrate() {
-    calGen++;                       // invalidate a previous scan if still running
-    var myGen = calGen;
+  // Learn the meter's beep by PRESS-AND-HOLD: while held, keep the strongest
+  // tonal beep heard; on release, lock its pitch.
+  var calGen = 0, calPressed = false, calActive = false;
+  var calBest, calFirstHit, calArr, calBinHz, calLo, calHi;
+
+  function startCalibrate() {
+    if (calActive) return;
+    calGen++; var myGen = calGen;
+    calPressed = true;
+    calBtn.classList.add("calibrating");
+    calBtn.textContent = "Starting mic…";
     startListen(function () {
       if (myGen !== calGen) return;
-      calibrating = true;
-      sustain = 0; fired = false;
-      calBtn.classList.add("calibrating");
-      calBtn.textContent = "Press a meter key to beep…";
-      micHint.textContent = "Listening… press one key on your meter to beep now.";
-      var arr = new Uint8Array(analyser.frequencyBinCount);
-      var binHz = audioCtx.sampleRate / analyser.fftSize;
-      var lo = Math.floor(600 / binHz), hi = Math.min(arr.length - 1, Math.ceil(9000 / binHz));
-      var best = { level: 0, bin: 0 };
-      var firstHit = 0;
-      var start = performance.now();
-      var TIMEOUT = 8000;
-
+      calActive = true; calibrating = true; sustain = 0; fired = false;
+      calBest = { level: 0, bin: 0 }; calFirstHit = false;
+      calArr = new Uint8Array(analyser.frequencyBinCount);
+      calBinHz = audioCtx.sampleRate / analyser.fftSize;
+      calLo = Math.floor(600 / calBinHz);
+      calHi = Math.min(calArr.length - 1, Math.ceil(9000 / calBinHz));
+      calBtn.textContent = "Listening… beep meter, then release";
+      micHint.textContent = "Keep holding and press a meter key so it beeps…";
       (function scan() {
-        if (myGen !== calGen) return;        // superseded by a newer re-learn
-        if (!analyser) { calibrating = false; return; }
-        analyser.getByteFrequencyData(arr);
-        var peak = 0, pbin = lo, sum = 0;
-        for (var i = lo; i <= hi; i++) { if (arr[i] > peak) { peak = arr[i]; pbin = i; } }
-        for (var j = 0; j < arr.length; j++) sum += arr[j];
-        var noise = sum / arr.length;
-        var ratio = peak / (noise + 1);
+        if (myGen !== calGen) return;
+        if (!analyser) { calActive = false; calibrating = false; return; }
+        analyser.getByteFrequencyData(calArr);
+        var peak = 0, pbin = calLo, sum = 0;
+        for (var i = calLo; i <= calHi; i++) { if (calArr[i] > peak) { peak = calArr[i]; pbin = i; } }
+        for (var j = 0; j < calArr.length; j++) sum += calArr[j];
+        var ratio = peak / (sum / calArr.length + 1);
         levelBar.style.width = Math.min(100, peak * 0.5) + "%";
-
-        var now = performance.now();
-        // A real beep: reasonably loud AND tonal (peak above broadband noise).
-        var isBeep = peak > 45 && ratio > 3.5;
-        if (isBeep) {
+        if (peak > 45 && ratio > 3.5) {
           blip.classList.add("hit");
-          if (!firstHit) firstHit = now;
-          if (peak > best.level) { best = { level: peak, bin: pbin }; }
+          calFirstHit = true;
+          if (peak > calBest.level) { calBest = { level: peak, bin: pbin }; }
         } else {
           blip.classList.remove("hit");
         }
-
-        var done = (firstHit && now - firstHit > 250) || (now - start > TIMEOUT);
-        if (!done) { requestAnimationFrame(scan); return; }
-
-        calibrating = false;
-        blip.classList.remove("hit");
-        calBtn.classList.remove("calibrating");
-        calBtn.textContent = "🎯 Re-learn beep";
-        if (!firstHit || best.level < 45) {
-          micHint.textContent = "Didn't catch a clear beep — tap Re-learn and hold the phone closer to the meter.";
-          return;
-        }
-        calibProfile = { bin: best.bin, level: best.level };
-        try { localStorage.setItem("meterBeep", JSON.stringify(calibProfile)); } catch (e) {}
-        micHint.textContent = "Learned ✓ beep ≈ " + Math.round(best.bin * binHz) + " Hz. Turn on Listen — each beep crosses a number.";
+        if (calPressed) requestAnimationFrame(scan);
+        else finishCalibrate();
       })();
     });
   }
+
+  function finishCalibrate() {
+    if (!calActive) return;
+    calActive = false; calibrating = false;
+    blip.classList.remove("hit");
+    calBtn.classList.remove("calibrating");
+    calBtn.textContent = "🎯 Re-learn beep";
+    if (!calFirstHit || calBest.level < 45) {
+      micHint.textContent = "Didn't catch a beep — hold Learn again and beep closer to the phone.";
+      return;
+    }
+    calibProfile = { bin: calBest.bin, level: calBest.level, hz: Math.round(calBest.bin * calBinHz) };
+    try { localStorage.setItem("meterBeep", JSON.stringify(calibProfile)); } catch (e) {}
+    playBtn.style.display = "";
+    micHint.textContent = "Learned ✓ beep ≈ " + calibProfile.hz + " Hz. Turn on Listen — each beep crosses a number.";
+  }
+
+  function stopCalibrate() {
+    calPressed = false;
+    if (!calActive) { // released before mic was ready
+      calBtn.classList.remove("calibrating");
+      calBtn.textContent = calibProfile ? "🎯 Re-learn beep" : "🎯 Learn beep from meter";
+    }
+  }
+
+  // Play back the learned beep so the user can confirm the pitch.
+  function playLearnedBeep() {
+    if (!calibProfile) return;
+    var hz = calibProfile.hz || Math.round(calibProfile.bin * (calBinHz || (audioCtx ? audioCtx.sampleRate / analyser.fftSize : 46.875)));
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = "square"; osc.frequency.value = hz || 2000;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.36);
+      osc.onended = function () { ctx.close(); };
+    } catch (e) {}
+  }
+
   try { var saved = localStorage.getItem("meterBeep"); if (saved) calibProfile = JSON.parse(saved); } catch (e) {}
   if (calibProfile) calBtn.textContent = "🎯 Re-learn beep";
 
@@ -594,7 +624,12 @@
   micBtn.addEventListener("click", function () {
     if (listening) stopListen(); else startListen();
   });
-  calBtn.addEventListener("click", calibrate);
+  // Press-and-hold to learn
+  calBtn.addEventListener("pointerdown", function (e) { e.preventDefault(); startCalibrate(); });
+  window.addEventListener("pointerup", stopCalibrate);
+  calBtn.addEventListener("pointercancel", stopCalibrate);
+  playBtn.addEventListener("click", playLearnedBeep);
+  if (calibProfile) playBtn.style.display = "";
   $("helpBtn").addEventListener("click", function () {
     $("helpBox").classList.toggle("hidden");
   });
