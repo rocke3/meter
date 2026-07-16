@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#0f172a" />
+<title>Meter Token Helper</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --card2: #273449;
+    --line: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent2: #0ea5e9;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --cross: #64748b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 16px;
+    max-width: 640px;
+    margin: 0 auto;
+    padding-bottom: 220px;
+  }
+  .tokens { padding-bottom: 24px; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    background: var(--card2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 14px;
+    resize: vertical;
+    font-family: inherit;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    font-family: inherit;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .05s, opacity .15s;
+  }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .4; cursor: default; }
+  .btn-primary { background: var(--accent2); color: #04222f; flex: 1; }
+  .btn-ghost { background: var(--card2); color: var(--text); border: 1px solid var(--line); }
+
+  /* Token list */
+  .tokens { margin-top: 4px; }
+  .token-line {
+    background: var(--card2);
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 12px 10px;
+    margin-bottom: 12px;
+    opacity: .55;
+    transition: opacity .2s, border-color .2s;
+  }
+  .token-line.active { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.15); }
+  .token-line.done  { opacity: 1; border-color: var(--green); }
+
+  .tl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .tl-num {
+    background: var(--accent);
+    color: #04222f;
+    font-weight: 700;
+    font-size: 14px;
+    min-width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+  }
+  .token-line.done .tl-num { background: var(--green); color: #05230f; }
+  .tl-progress { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+  .digits {
+    display: flex; flex-wrap: wrap; gap: 8px 6px;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .grp { display: inline-flex; gap: 2px; }
+  .dash { align-self: center; color: var(--muted); font-weight: 400; font-size: clamp(16px, 5vw, 22px); }
+  .digit {
+    font-size: clamp(20px, 6.6vw, 28px);
+    font-weight: 700;
+    width: clamp(15px, 5vw, 22px);
+    text-align: center;
+    position: relative;
+    transition: color .15s;
+  }
+  .digit.crossed { color: var(--cross); }
+  .digit.crossed::after {
+    content: "";
+    position: absolute;
+    left: -1px; right: -1px;
+    top: 52%;
+    height: 3px;
+    background: var(--red);
+    border-radius: 2px;
+    transform: scaleX(1);
+    transform-origin: left;
+    animation: strike .12s ease-out;
+  }
+  @keyframes strike { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  .digit.next { color: var(--accent); }
+  .digit.next::before {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 14px; height: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    transform: translateX(-50%);
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  .tl-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .tl-actions button { padding: 8px 12px; font-size: 13px; flex: 1; }
+  .btn-next { background: var(--green); color: #05230f; }
+  .btn-undo { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+  .btn-back { background: var(--card); color: var(--muted); border: 1px solid var(--line); }
+
+  .done-badge { color: var(--green); font-size: 13px; font-weight: 600; }
+
+  /* Mic control bar (sticky) */
+  .micbar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(15,23,42,.96);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    max-width: 640px; margin: 0 auto;
+  }
+  .micbar.hidden { display: none; }
+  .mic-row { display: flex; align-items: center; gap: 8px; }
+  .mic-row2 { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .btn-mic { background: var(--card2); color: var(--text); border: 1px solid var(--line); flex: 1; white-space: nowrap; padding: 11px 12px; }
+  .btn-mic.on { background: var(--green); color: #05230f; }
+  .btn-tap { background: var(--accent2); color: #04222f; min-width: 96px; white-space: nowrap; padding: 11px 14px; }
+  .btn-cal { background: var(--card2); color: var(--amber); border: 1px solid var(--amber); white-space: nowrap; padding: 9px 12px; font-size: 13px; }
+  .btn-cal.calibrating { background: var(--amber); color: #2a1a02; }
+  .btn-help { flex: 0 0 auto; width: 38px; padding: 9px 0; background: var(--card2); color: var(--muted); border: 1px solid var(--line); }
+  .blip { width: 14px; height: 14px; border-radius: 50%; background: var(--line); flex: 0 0 auto; transition: background .05s; }
+  .blip.hit { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .level {
+    height: 5px; background: var(--line); border-radius: 4px;
+    overflow: hidden; margin-top: 8px;
+  }
+  .level > div { height: 100%; width: 0%; background: var(--accent); transition: width .05s; }
+  .sens { flex: 1; display: flex; align-items: center; }
+  .sens input { width: 100%; }
+  .status { font-size: 11.5px; color: var(--muted); margin-top: 6px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .hint.hidden { display: none; }
+
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 20px 0; }
+  .flash { animation: flashbg .4s; }
+  @keyframes flashbg { from { background: rgba(34,197,94,.25); } }
+
+  /* Phone tuning */
+  @media (max-width: 430px) {
+    body { padding: 12px; padding-bottom: 230px; }
+    h1 { font-size: 18px; }
+    .sub { font-size: 12px; margin-bottom: 12px; }
+    .card { padding: 12px; border-radius: 12px; }
+    .token-line { padding: 10px 8px 8px; }
+    .row button, .btn-primary { padding: 12px 12px; font-size: 14px; }
+    .btn-tap { min-width: 104px; padding: 12px 10px; }
+    .micbar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  }
+</style>
+</head>
+<body>
+  <h1>⚡ Meter Token Helper</h1>
+  <p class="sub">Paste your prepaid recharge SMS. Enter each token into your meter and cross the digits as you go.</p>
+
+  <div class="card">
+    <textarea id="input" placeholder="Paste the full token SMS here…"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn-primary" id="parseBtn">Extract Tokens</button>
+      <button class="btn-ghost" id="sampleBtn">Sample</button>
+      <button class="btn-ghost" id="clearBtn">Clear</button>
+    </div>
+  </div>
+
+  <div id="tokens" class="tokens">
+    <div class="empty">No tokens yet. Paste a message and tap <b>Extract Tokens</b>.</div>
+  </div>
+
+  <div class="micbar hidden" id="micbar">
+    <div class="mic-row">
+      <button class="btn-mic" id="micBtn">🎙️ Listen: Off</button>
+      <span class="blip" id="blip"></span>
+      <button class="btn-tap" id="tapBtn">Tap ✕</button>
+    </div>
+    <div class="mic-row2">
+      <button class="btn-cal" id="calBtn">🎯 Learn beep from meter</button>
+      <div class="sens"><input type="range" id="sens" min="4" max="60" value="30" title="Sensitivity" /></div>
+      <button class="btn-help" id="helpBtn" aria-label="Help">?</button>
+    </div>
+    <div class="level"><div id="levelBar"></div></div>
+    <div class="status" id="micHint">Tip: tap “Learn beep from meter” first for reliable detection.</div>
+    <div class="hint hidden" id="helpBox">Tap <b>Learn beep from meter</b> and press one meter key so it beeps once — the app learns that tone (saved for next time). Then turn on Listen; the dot flashes green per beep. Slider = sensitivity. Tap ✕ always crosses one manually.</div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var SAMPLE = "Successful!Your BPDBprepaid Prepaid Token is 2749-4142-5873-7905-1794,2858-2934-6178-6013-7419,5335-6478-7156-2776-2850,0786-2805-4702-9362-6049,7033-2836-4093-5151-3767,0382-9476-1873-7593-6976,5943-4151-0025-7930-2885,2523-9003-6728-1708-0746,1934-5909-2940-9691-4783,SquNo:0=8 for offline Meter No:010210743435,Vending Amt:6000.00";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var input = $("input");
+  var tokensEl = $("tokens");
+  var micbar = $("micbar");
+
+  var state = {
+    lines: [],       // array of { digits: [..20], crossed: int, done: bool }
+    activeIdx: -1
+  };
+
+  // --- Parsing ---------------------------------------------------------
+  function parse(text) {
+    // Match tokens: 5 groups of 4 digits separated by - or space
+    var re = /\b(\d{4})[-\s]?(\d{4})[-\s]?(\d{4})[-\s]?(\d{4})[-\s]?(\d{4})\b/g;
+    var out = [], m;
+    while ((m = re.exec(text)) !== null) {
+      out.push(m[1] + m[2] + m[3] + m[4] + m[5]); // 20 digits, no separators
+    }
+    return out;
+  }
+
+  function render() {
+    tokensEl.innerHTML = "";
+    if (!state.lines.length) {
+      tokensEl.innerHTML = '<div class="empty">No 20-digit tokens found. Check the message and try again.</div>';
+      micbar.classList.add("hidden");
+      return;
+    }
+    micbar.classList.remove("hidden");
+
+    state.lines.forEach(function (line, i) {
+      var wrap = document.createElement("div");
+      wrap.className = "token-line" + (i === state.activeIdx ? " active" : "") + (line.done ? " done" : "");
+      wrap.dataset.idx = i;
+
+      var head = document.createElement("div");
+      head.className = "tl-head";
+      head.innerHTML = '<span class="tl-num">' + (i + 1) + '</span>' +
+        '<span class="tl-progress">' + (line.done ? '<span class="done-badge">✓ Done</span>' : (line.crossed + " / 20")) + '</span>';
+      wrap.appendChild(head);
+
+      var digits = document.createElement("div");
+      digits.className = "digits";
+      for (var g = 0; g < 5; g++) {
+        var grp = document.createElement("div");
+        grp.className = "grp";
+        for (var dd = 0; dd < 4; dd++) {
+          var d = g * 4 + dd;
+          var span = document.createElement("span");
+          span.className = "digit";
+          if (d < line.crossed) span.className += " crossed";
+          else if (d === line.crossed && i === state.activeIdx) span.className += " next";
+          span.textContent = line.digits[d];
+          span.dataset.d = d;
+          grp.appendChild(span);
+        }
+        digits.appendChild(grp);
+        if (g < 4) {
+          var dash = document.createElement("span");
+          dash.className = "dash";
+          dash.textContent = "-";
+          digits.appendChild(dash);
+        }
+      }
+      wrap.appendChild(digits);
+
+      if (i === state.activeIdx) {
+        var actions = document.createElement("div");
+        actions.className = "tl-actions";
+        var backBtn = i > 0 ? '<button class="btn-back" data-act="back">◂ Back</button>' : '';
+        actions.innerHTML =
+          backBtn +
+          '<button class="btn-undo" data-act="undo">Undo ↶</button>' +
+          '<button class="btn-next" data-act="next">' + (i < state.lines.length - 1 ? 'Done ▸' : 'Finish ✓') + '</button>';
+        wrap.appendChild(actions);
+      }
+
+      tokensEl.appendChild(wrap);
+    });
+  }
+
+  // --- Actions ---------------------------------------------------------
+  function crossOne() {
+    if (state.activeIdx < 0) return;
+    var line = state.lines[state.activeIdx];
+    if (!line || line.done) return;
+    if (line.crossed >= 20) return; // wait for user to confirm Next line
+    line.crossed++;
+    if (line.crossed >= 20) {
+      pauseListen(); // pause so user confirms before line 2
+      buzz(120);
+    } else {
+      buzz(25);
+    }
+    render();
+    scrollActiveIntoView();
+  }
+
+  function undoOne() {
+    if (state.activeIdx < 0) return;
+    var line = state.lines[state.activeIdx];
+    if (line.crossed > 0) { line.crossed--; render(); }
+  }
+
+  function nextLine() {
+    var line = state.lines[state.activeIdx];
+    line.done = true;
+    var ni = state.activeIdx + 1;
+    state.activeIdx = ni < state.lines.length ? ni : -1;
+    render();
+    if (state.activeIdx >= 0) scrollActiveIntoView();
+  }
+
+  function prevLine() {
+    var target = state.activeIdx === -1 ? state.lines.length - 1 : state.activeIdx - 1;
+    if (target < 0) return;
+    state.lines[target].done = false;   // reopen it for editing
+    state.activeIdx = target;
+    armed = true;
+    render();
+    scrollActiveIntoView();
+  }
+
+  function scrollActiveIntoView() {
+    var el = tokensEl.querySelector(".token-line.active");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function buzz(ms) { if (navigator.vibrate) try { navigator.vibrate(ms); } catch (e) {} }
+
+  tokensEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (btn) {
+      var act = btn.dataset.act;
+      var lineEl = e.target.closest(".token-line");
+      var idx = lineEl ? parseInt(lineEl.dataset.idx, 10) : -1;
+      if (act === "next") nextLine();
+      else if (act === "undo") undoOne();
+      else if (act === "back") prevLine();
+      return;
+    }
+    // Tap on a digit of the active line = cross up to there (manual)
+    var lineEl2 = e.target.closest(".token-line");
+    if (lineEl2 && parseInt(lineEl2.dataset.idx, 10) === state.activeIdx) {
+      crossOne();
+    }
+  });
+
+  function copyToken(idx) {
+    if (idx < 0) return;
+    var t = state.lines[idx].digits.join("");
+    if (navigator.clipboard) navigator.clipboard.writeText(t);
+  }
+
+  $("parseBtn").addEventListener("click", function () {
+    var toks = parse(input.value);
+    state.lines = toks.map(function (t) {
+      return { digits: t.split(""), crossed: 0, done: false };
+    });
+    state.activeIdx = state.lines.length ? 0 : -1;
+    render();
+    if (state.lines.length) scrollActiveIntoView();
+  });
+
+  $("sampleBtn").addEventListener("click", function () { input.value = SAMPLE; });
+  $("clearBtn").addEventListener("click", function () {
+    input.value = ""; state.lines = []; state.activeIdx = -1; render();
+  });
+
+  // --- Manual tap button ----------------------------------------------
+  $("tapBtn").addEventListener("click", crossOne);
+
+  // --- Mic beep detection ---------------------------------------------
+  var audioCtx = null, analyser = null, micStream = null, rafId = null;
+  var listening = false, armed = true, calibrating = false;
+  var lastCross = 0, wasBeep = false;
+  var calibProfile = null; // { bin, level }
+  var sensEl = $("sens");
+  var levelBar = $("levelBar");
+  var micBtn = $("micBtn");
+  var micHint = $("micHint");
+  var calBtn = $("calBtn");
+  var blip = $("blip");
+
+  function startListen(onReady) {
+    if (listening) { if (onReady) onReady(); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      micHint.textContent = "Microphone not available on this browser. Use the Tap button.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then(function (stream) {
+        micStream = stream;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var src = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 4096;
+        analyser.smoothingTimeConstant = 0;
+        src.connect(analyser);
+        listening = true;
+        micBtn.classList.add("on");
+        micBtn.textContent = "🎙️ Listen: On";
+        if (calibProfile) micHint.textContent = "Listening for your learned beep. Dot flashes on each detection.";
+        else micHint.textContent = "Listening (generic). For best results tap “Learn beep from meter” first.";
+        loop();
+        if (onReady) onReady();
+      })
+      .catch(function () {
+        micHint.textContent = "Mic permission denied. Use the Tap button instead.";
+      });
+  }
+
+  // Learn the meter's beep: wait for a clear TONAL beep (sharp peak far above
+  // the noise floor), lock its pitch, and finish as soon as it's captured.
+  function calibrate() {
+    startListen(function () {
+      calibrating = true;
+      calBtn.classList.add("calibrating");
+      calBtn.textContent = "Press a meter key to beep…";
+      micHint.textContent = "Waiting for the beep… press one key on your meter now.";
+      var arr = new Uint8Array(analyser.frequencyBinCount);
+      var binHz = audioCtx.sampleRate / analyser.fftSize;
+      var lo = Math.floor(600 / binHz), hi = Math.min(arr.length - 1, Math.ceil(9000 / binHz));
+      var best = { level: 0, bin: 0, ratio: 0 };
+      var firstHit = 0;                 // when a beep was first detected
+      var start = performance.now();
+      var TIMEOUT = 8000;
+
+      (function scan() {
+        if (!analyser) { calibrating = false; return; }
+        analyser.getByteFrequencyData(arr);
+        // peak inside the search band
+        var peak = 0, pbin = lo, sum = 0;
+        for (var i = lo; i <= hi; i++) { if (arr[i] > peak) { peak = arr[i]; pbin = i; } }
+        for (var j = 0; j < arr.length; j++) sum += arr[j];
+        var noise = sum / arr.length;
+        var ratio = peak / (noise + 1);
+        levelBar.style.width = Math.min(100, peak * 0.5) + "%";
+
+        var now = performance.now();
+        // A real beep: loud AND tonal (peak stands well above broadband noise).
+        var isBeep = peak > 60 && ratio > 4;
+        if (isBeep) {
+          blip.classList.add("hit");
+          if (!firstHit) firstHit = now;
+          // keep the strongest reading of this beep
+          if (peak > best.level) { best = { level: peak, bin: pbin, ratio: ratio }; }
+        } else {
+          blip.classList.remove("hit");
+        }
+
+        // Finish 250ms after first detection (captures the beep's true peak),
+        // or bail out after the timeout.
+        var done = (firstHit && now - firstHit > 250) || (now - start > TIMEOUT);
+        if (!done) { requestAnimationFrame(scan); return; }
+
+        calibrating = false;
+        blip.classList.remove("hit");
+        calBtn.classList.remove("calibrating");
+        calBtn.textContent = "🎯 Re-learn beep";
+        if (!firstHit || best.level < 60) {
+          micHint.textContent = "Didn't catch a clear beep — try again, hold the phone closer to the meter.";
+          return;
+        }
+        calibProfile = { bin: best.bin, level: best.level };
+        try { localStorage.setItem("meterBeep", JSON.stringify(calibProfile)); } catch (e) {}
+        micHint.textContent = "Learned ✓ beep ≈ " + Math.round(best.bin * binHz) + " Hz. Turn on Listen — each beep crosses a number.";
+      })();
+    });
+  }
+  try { var saved = localStorage.getItem("meterBeep"); if (saved) calibProfile = JSON.parse(saved); } catch (e) {}
+  if (calibProfile) calBtn.textContent = "🎯 Re-learn beep";
+
+  function stopListen() {
+    listening = false;
+    micBtn.classList.remove("on");
+    micBtn.textContent = "🎙️ Listen: Off";
+    if (rafId) cancelAnimationFrame(rafId);
+    if (micStream) micStream.getTracks().forEach(function (t) { t.stop(); });
+    if (audioCtx) audioCtx.close();
+    audioCtx = analyser = micStream = null;
+    levelBar.style.width = "0%";
+  }
+
+  // Pause detection (without dropping mic) after a line completes,
+  // so a stray beep doesn't start crossing the next line.
+  function pauseListen() { armed = false; }
+
+  var data = null;
+  function loop() {
+    if (!listening) { rafId = null; return; }
+    if (!data || data.length !== analyser.frequencyBinCount) data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(data);
+    rafId = requestAnimationFrame(loop);
+    if (calibrating) return; // calibration owns the analyser; don't cross
+
+    var len = data.length;
+    var binHz = audioCtx.sampleRate / analyser.fftSize;
+
+    // Noise floor = average across the whole spectrum (fans raise this evenly)
+    var sum = 0;
+    for (var j = 0; j < len; j++) sum += data[j];
+    var noise = sum / len;
+
+    var peak = 0, need, sens = parseInt(sensEl.value, 10);
+    if (calibProfile) {
+      // Only look at the learned beep frequency (±3 bins for drift)
+      var b = calibProfile.bin;
+      var lo = Math.max(1, b - 3), hi = Math.min(len - 1, b + 3);
+      for (var i = lo; i <= hi; i++) { if (data[i] > peak) peak = data[i]; }
+      // Slider right = more sensitive => needs a smaller fraction of the learned level
+      var frac = 0.80 - (sens - 4) / 56 * 0.55; // ~0.80 (left) .. ~0.25 (right)
+      need = Math.max(30, calibProfile.level * frac);
+      levelBar.style.width = Math.min(100, peak / calibProfile.level * 100) + "%";
+    } else {
+      // Generic fallback: brightest tone in 1.5-5 kHz
+      var g0 = Math.max(1, Math.floor(1500 / binHz)), g1 = Math.min(len - 1, Math.ceil(5000 / binHz));
+      for (var k = g0; k <= g1; k++) { if (data[k] > peak) peak = data[k]; }
+      need = 64 - sens;
+      levelBar.style.width = Math.min(100, peak * 0.5) + "%";
+    }
+
+    var ratio = peak / (noise + 1);       // tonality: high for a beep, low for a fan
+    var now = performance.now();
+
+    if (state.activeIdx >= 0 && state.lines[state.activeIdx] && state.lines[state.activeIdx].crossed < 20) {
+      armed = true;
+    }
+    // Rising edge only, so a held sound crosses once, and steady noise never "onsets".
+    var isBeep = peak > need && ratio > 3.0;
+    if (isBeep && !wasBeep) {
+      blip.classList.add("hit");
+      setTimeout(function () { blip.classList.remove("hit"); }, 120);
+      if (armed && (now - lastCross) > 180) { lastCross = now; crossOne(); }
+    }
+    wasBeep = isBeep;
+  }
+
+  micBtn.addEventListener("click", function () {
+    if (listening) stopListen(); else startListen();
+  });
+  calBtn.addEventListener("click", calibrate);
+  $("helpBtn").addEventListener("click", function () {
+    $("helpBox").classList.toggle("hidden");
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
